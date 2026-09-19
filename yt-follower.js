@@ -291,6 +291,7 @@ async function main() {
     }
   }
 
+  await saveSeen(seen);
   console.log(testMode ? `Тест завершён. Обработано: ${processed}` : `Готово. Обработано новых видео: ${processed}`);
 }
 
