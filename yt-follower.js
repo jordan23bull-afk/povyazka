@@ -94,10 +94,12 @@ function parseFeed(xml) {
   return out;
 }
 
+const MSK_OFFSET = 3 * 3600 * 1000;
+
 function isToday(published) {
-  const d = new Date(published);
+  const d = new Date(new Date(published).getTime() + MSK_OFFSET);
   if (isNaN(d.getTime())) return false;
-  const now = new Date();
+  const now = new Date(Date.now() + MSK_OFFSET);
   return d.getUTCFullYear() === now.getUTCFullYear()
     && d.getUTCMonth() === now.getUTCMonth()
     && d.getUTCDate() === now.getUTCDate();
