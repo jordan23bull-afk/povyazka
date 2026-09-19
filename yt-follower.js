@@ -4,7 +4,7 @@ import { YoutubeTranscript } from 'youtube-transcript';
 const env = process.env;
 
 const BOT_TOKEN = env.BOT_TOKEN || '8889273791:AAE_kh1MxwVsUqNMAJl6LhpCE00VkAwoPmE';
-const CHAT_ID = env.CHAT_ID || '1246093763';
+const CHAT_ID = env.CHAT_ID || '1601688591';
 const LLM_API_KEY = env.LLM_API_KEY || 'ВАШ_КЛЮЧ';
 const LLM_BASE_URL = env.LLM_BASE_URL || 'https://api.openai.com/v1';
 const LLM_MODEL = env.LLM_MODEL || 'gpt-4o-mini';
