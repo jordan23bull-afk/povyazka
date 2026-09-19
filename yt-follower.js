@@ -1,5 +1,4 @@
 import fs from 'fs/promises';
-import { YoutubeTranscript } from 'youtube-transcript';
 
 const env = process.env;
 
@@ -141,16 +140,58 @@ async function fetchLatestVideos(channelId, n) {
   return parseFeed(xml).slice(0, n);
 }
 
-async function getTranscript(videoId) {
+function extractCaptionTracks(html) {
+  const m = html.match(/"captionTracks":\[([\s\S]*?)\]/);
+  if (!m) return [];
   try {
-    const chunks = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'ru' });
-    if (chunks?.length) return chunks.map(c => c.text).join(' ');
-  } catch {}
-  try {
-    const chunks = await YoutubeTranscript.fetchTranscript(videoId);
-    if (chunks?.length) return chunks.map(c => c.text).join(' ');
-  } catch {}
-  return fetchGoogleTimedText(videoId);
+    const arr = JSON.parse('[' + m[1] + ']');
+    return arr.map(t => ({
+      url: t.baseUrl || '',
+      lang: t.languageCode || '',
+      isAsr: !!t.kind,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function extractShortDescription(html) {
+  const m = html.match(/"shortDescription":"((?:[^"\\]|\\.)*)"/);
+  if (!m) return '';
+  return m[1]
+    .replace(/\\n/g, '\n')
+    .replace(/\\"/g, '"')
+    .replace(/\\\//g, '/')
+    .replace(/\\\\/g, '\\');
+}
+
+async function fetchCaptionBase(baseUrl) {
+  const sep = baseUrl.includes('?') ? '&' : '?';
+  const raw = await fetchText(baseUrl + sep + 'fmt=json3');
+  const data = JSON.parse(raw);
+  const out = (data.events || [])
+    .map(e => (e.segs || []).map(s => s.utf8 || '').join(''))
+    .filter(s => s.trim())
+    .join(' ');
+  return out || null;
+}
+
+async function extractTranscriptFromPage(html) {
+  const tracks = extractCaptionTracks(html);
+  if (!tracks.length) return null;
+  const ru = tracks.filter(t => t.lang.toLowerCase().startsWith('ru'));
+  const asr = ru.length ? ru : tracks.filter(t => t.isAsr);
+  const ordered = ru.concat(asr, tracks);
+  const tried = new Set();
+  for (const t of ordered) {
+    if (tried.has(t.url + t.lang)) continue;
+    tried.add(t.url + t.lang);
+    try {
+      const text = await fetchCaptionBase(t.url);
+      if (text) return text;
+    } catch {}
+  }
+  return null;
 }
 
 async function fetchGoogleTimedText(videoId) {
@@ -171,24 +212,15 @@ async function fetchGoogleTimedText(videoId) {
   return null;
 }
 
-async function getWatchDescription(videoId) {
-  try {
-    const html = await fetchText(`https://www.youtube.com/watch?v=${videoId}`);
-    const m = html.match(/"shortDescription":"((?:[^"\\]|\\.)*)"/);
-    if (!m) return '';
-    return m[1]
-      .replace(/\\n/g, '\n')
-      .replace(/\\"/g, '"')
-      .replace(/\\\//g, '/')
-      .replace(/\\\\/g, '\\');
-  } catch {
-    return '';
-  }
-}
-
 async function gatherContent(video) {
-  const transcript = await getTranscript(video.id);
-  const desc = video.description || (await getWatchDescription(video.id));
+  let html = '';
+  try {
+    html = await fetchText(`https://www.youtube.com/watch?v=${video.id}`);
+  } catch {}
+  let desc = html ? extractShortDescription(html) : '';
+  if (!desc) desc = video.description || '';
+  let transcript = html ? await extractTranscriptFromPage(html) : null;
+  if (!transcript) transcript = await fetchGoogleTimedText(video.id);
   return { transcript, desc };
 }
 
