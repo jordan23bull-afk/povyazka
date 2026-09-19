@@ -233,6 +233,48 @@ async function fetchGoogleTimedText(videoId) {
   return null;
 }
 
+async function getCaptionFromInnertube(videoId) {
+  try {
+    const res = await fetch('https://www.youtube.com/youtubei/v1/player', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'com.google.android.youtube/19.29.37 (Linux; U; Android 11) gzip',
+        'Accept-Language': 'ru-RU,ru;q=0.9',
+      },
+      body: JSON.stringify({
+        context: {
+          client: { clientName: 'ANDROID', clientVersion: '19.29.37', androidSdkVersion: 30, hl: 'ru', gl: 'RU' },
+        },
+        videoId,
+        contentCheckOk: true,
+        racyCheckOk: true,
+      }),
+    });
+    if (!res.ok) {
+      console.log(`  innertube player http ${res.status}`);
+      return null;
+    }
+    const data = await res.json();
+    const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+    console.log('  innertube tracks:', tracks.length, tracks.length ? tracks.slice(0, 3).map(t => `${t.languageCode}${t.kind ? '/asr' : ''}`).join(', ') : '');
+    if (!tracks.length) return null;
+    const ru = tracks.filter(t => (t.languageCode || '').toLowerCase().startsWith('ru'));
+    const asr = ru.length ? ru : tracks.filter(t => t.kind && t.kind.includes('asr'));
+    const ordered = ru.concat(asr, tracks);
+    const tried = new Set();
+    for (const t of ordered) {
+      if (!t.baseUrl || tried.has(t.baseUrl)) continue;
+      tried.add(t.baseUrl);
+      const text = await fetchCaptionBase(t.baseUrl);
+      if (text) return text;
+    }
+  } catch (e) {
+    console.log(`  innertube не вышел: ${e.message}`);
+  }
+  return null;
+}
+
 async function gatherContent(video) {
   let html = '';
   for (const u of [
@@ -244,9 +286,13 @@ async function gatherContent(video) {
       if (html && extractCaptionTracks(html).length) break;
     } catch {}
   }
+  if (html) {
+    console.log(`  page ${html.length}b, ytInitialPlayerResponse: ${html.includes('ytInitialPlayerResponse')}, captionTracks in page: ${html.includes('captionTracks')}`);
+  }
   let desc = html ? extractShortDescription(html) : '';
   if (!desc) desc = video.description || '';
   let transcript = html ? await extractTranscriptFromPage(html) : null;
+  if (!transcript) transcript = await getCaptionFromInnertube(video.id);
   if (!transcript) transcript = await fetchGoogleTimedText(video.id);
   return { transcript, desc };
 }
