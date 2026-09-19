@@ -171,16 +171,16 @@ ${(transcript || '').slice(0, MAX_CHARS)}
 """
 
 Ответь СТРОГО в одном из двух вариантов:
-1. Если в видео НЕТ информации про финансовый инструмент И его цену / ценовой уровень / ценовую зону / сигнал к действию — ответь ровно одно слово: NO_PRICE
+1. Если в видео НЕТ конкретных числовых значений цены / ценового уровня / ценовой зоны по финансовому инструменту — ответь ровно одно слово: NO_PRICE. Слова без цифр («уровень коррекции», «выше/ниже», «растёт/падает») ценой НЕ считаются.
 2. Иначе дай разбор РОВНО в таком формате (каждая строчка с новой строки, в этой же очерёдности):
 Инструмент: (название)
 Тикер: (тикер, если нет — прочерк -)
-Цена: (актуальная цена, если нет — прочерк -)
-Уровень: (ценовой уровень/зона, если нет — прочерк -)
+Цена: (актуальная цена ЧИСЛОМ, если нет — прочерк -)
+Уровень: (ценовой уровень/зона ЧИСЛОМ, если нет — прочерк -)
 Действие: ПОКУПКА / ПРОДАЖА / НАБЛЮДЕНИЕ
 Суть: (одно-два предложения о том, что происходит с инструментом)
 
-Пиши только по фактам из видео, ничего не додумывай.`;
+Заполняй Цена/Уровень только реальными числами из видео. Пиши только по фактам, ничего не додумывай.`;
 }
 
 const LLM_RETRIES = Number(env.LLM_RETRIES || 6);
@@ -226,6 +226,10 @@ function escapeHtml(s) {
     .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
+function hasNumericPrice(analysis) {
+  return [...analysis.matchAll(/^(?:Цена|Уровень)\s*[:：]\s*(.*)$/gm)].some(m => /\d/.test(m[1]));
+}
+
 async function sendToTelegram(text) {
   const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
   const res = await fetch(url, {
@@ -253,8 +257,8 @@ async function processVideo(channelName, video) {
     return;
   }
 
-  if (!analysis.trim() || /NO_PRICE/i.test(analysis)) {
-    console.log('  не интересует: нет цены/уровня по инструменту');
+  if (!analysis.trim() || /NO_PRICE/i.test(analysis) || !hasNumericPrice(analysis)) {
+    console.log('  не интересует: нет численной цены/уровня по инструменту');
     return;
   }
 
@@ -340,8 +344,8 @@ async function testVideo(video) {
   const transcript = await getTranscript(video.id);
   console.log('  транскрипт:', transcript ? `${transcript.length} символов` : 'недоступен');
   const analysis = await analyze(video.title, video.description, transcript);
-  if (!analysis.trim() || /NO_PRICE/i.test(analysis)) {
-    console.log('  LLM ответил: не интересует (нет цены/уровня)');
+  if (!analysis.trim() || /NO_PRICE/i.test(analysis) || !hasNumericPrice(analysis)) {
+    console.log('  не интересует: нет численной цены/уровня');
     return;
   }
   const fields = analysis
