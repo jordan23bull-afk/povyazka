@@ -249,6 +249,7 @@ async function processVideo(channelName, video) {
   console.log(`  видео: ${video.id} «${video.title}»`);
 
   const transcript = await getTranscript(video.id);
+  console.log('  транскрипт:', transcript ? `${transcript.length} символов` : 'недоступен');
   let analysis;
   try {
     analysis = await analyze(video.title, video.description, transcript);
@@ -257,8 +258,17 @@ async function processVideo(channelName, video) {
     return;
   }
 
-  if (!analysis.trim() || /NO_PRICE/i.test(analysis) || !hasNumericPrice(analysis)) {
-    console.log('  не интересует: нет численной цены/уровня по инструменту');
+  if (!analysis.trim()) {
+    console.log('  LLM: пустой ответ → не интересует');
+    return;
+  }
+  if (/NO_PRICE/i.test(analysis)) {
+    console.log('  LLM: NO_PRICE → не интересует');
+    return;
+  }
+  if (!hasNumericPrice(analysis)) {
+    console.log('  LLM: разбор без чисел → не интересует');
+    console.log('  ' + analysis.replace(/\n/g, '\n  ').slice(0, 500));
     return;
   }
 
