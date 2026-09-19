@@ -1,0 +1,11 @@
+{
+  "name": "tg-posts-follower",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node tg-follower.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
