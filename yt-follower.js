@@ -233,44 +233,62 @@ async function fetchGoogleTimedText(videoId) {
   return null;
 }
 
+const INNERTUBE_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
+
+const INNERTUBE_CLIENTS = [
+  { name: 'WEB_EMBEDDED_PLAYER', version: '1.20240724.01.00', thirdParty: { embedUrl: 'https://www.youtube.com' } },
+  { name: 'ANDROID', version: '19.09.37', androidSdkVersion: 30 },
+  { name: 'IOS', version: '19.29.1', deviceModel: 'iPhone16,2' },
+];
+
 async function getCaptionFromInnertube(videoId) {
-  try {
-    const res = await fetch('https://www.youtube.com/youtubei/v1/player', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'com.google.android.youtube/19.29.37 (Linux; U; Android 11) gzip',
-        'Accept-Language': 'ru-RU,ru;q=0.9',
-      },
-      body: JSON.stringify({
-        context: {
-          client: { clientName: 'ANDROID', clientVersion: '19.29.37', androidSdkVersion: 30, hl: 'ru', gl: 'RU' },
+  for (const c of INNERTUBE_CLIENTS) {
+    try {
+      const res = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_KEY}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36',
+          'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8',
         },
-        videoId,
-        contentCheckOk: true,
-        racyCheckOk: true,
-      }),
-    });
-    if (!res.ok) {
-      console.log(`  innertube player http ${res.status}`);
-      return null;
+        body: JSON.stringify({
+          context: {
+            client: {
+              clientName: c.name,
+              clientVersion: c.version,
+              hl: 'ru',
+              gl: 'RU',
+              ...(c.androidSdkVersion ? { androidSdkVersion: c.androidSdkVersion } : {}),
+              ...(c.deviceModel ? { deviceModel: c.deviceModel } : {}),
+            },
+            ...(c.thirdParty ? { thirdParty: c.thirdParty } : {}),
+          },
+          videoId,
+          contentCheckOk: true,
+          racyCheckOk: true,
+        }),
+      });
+      if (!res.ok) {
+        console.log(`  innertube ${c.name} http ${res.status}`);
+        continue;
+      }
+      const data = await res.json();
+      const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+      console.log(`  innertube ${c.name} tracks:`, tracks.length, tracks.length ? tracks.slice(0, 4).map(t => `${t.languageCode}${t.kind ? '/asr' : ''}`).join(', ') : '');
+      if (!tracks.length) continue;
+      const ru = tracks.filter(t => (t.languageCode || '').toLowerCase().startsWith('ru'));
+      const asr = ru.length ? ru : tracks.filter(t => t.kind && t.kind.includes('asr'));
+      const ordered = ru.concat(asr, tracks);
+      const tried = new Set();
+      for (const t of ordered) {
+        if (!t.baseUrl || tried.has(t.baseUrl)) continue;
+        tried.add(t.baseUrl);
+        const text = await fetchCaptionBase(t.baseUrl);
+        if (text) return text;
+      }
+    } catch (e) {
+      console.log(`  innertube ${c.name} не вышел: ${e.message}`);
     }
-    const data = await res.json();
-    const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-    console.log('  innertube tracks:', tracks.length, tracks.length ? tracks.slice(0, 3).map(t => `${t.languageCode}${t.kind ? '/asr' : ''}`).join(', ') : '');
-    if (!tracks.length) return null;
-    const ru = tracks.filter(t => (t.languageCode || '').toLowerCase().startsWith('ru'));
-    const asr = ru.length ? ru : tracks.filter(t => t.kind && t.kind.includes('asr'));
-    const ordered = ru.concat(asr, tracks);
-    const tried = new Set();
-    for (const t of ordered) {
-      if (!t.baseUrl || tried.has(t.baseUrl)) continue;
-      tried.add(t.baseUrl);
-      const text = await fetchCaptionBase(t.baseUrl);
-      if (text) return text;
-    }
-  } catch (e) {
-    console.log(`  innertube не вышел: ${e.message}`);
   }
   return null;
 }
