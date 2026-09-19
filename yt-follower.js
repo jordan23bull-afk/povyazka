@@ -314,7 +314,7 @@ async function main() {
           : await fetchTodayVideos(channelId);
         console.log(`[${channel}] ${TEST_LATEST ? 'последнее видео' : 'видео за сегодня'}: ${videos.length}`);
         for (const video of videos) {
-          if (seen[video.id]) continue;
+          if (!testMode && seen[video.id]) continue;
           try {
             await processVideo(channel, video);
             processed++;
