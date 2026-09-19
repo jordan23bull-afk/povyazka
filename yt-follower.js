@@ -183,8 +183,8 @@ ${(transcript || '').slice(0, MAX_CHARS)}
 Пиши только по фактам из видео, ничего не додумывай.`;
 }
 
-const LLM_RETRIES = Number(env.LLM_RETRIES || 4);
-const LLM_RETRY_DELAY_MS = Number(env.LLM_RETRY_DELAY_MS || 15000);
+const LLM_RETRIES = Number(env.LLM_RETRIES || 6);
+const LLM_RETRY_DELAY_MS = Number(env.LLM_RETRY_DELAY_MS || 20000);
 
 async function analyze(title, description, transcript) {
   const body = JSON.stringify({
@@ -203,7 +203,7 @@ async function analyze(title, description, transcript) {
         },
         body,
       });
-      if (res.status === 429 || res.status === 500 || res.status === 502 || res.status === 503) {
+      if (res.status === 429 || res.status >= 500) {
         lastErr = new Error(`LLM HTTP ${res.status}`);
         const wait = LLM_RETRY_DELAY_MS * (attempt + 1);
         console.log(`  LLM лимит/перегрузка (${res.status}), повтор ${attempt + 1}/${LLM_RETRIES} через ${Math.round(wait / 1000)}с`);
@@ -215,7 +215,7 @@ async function analyze(title, description, transcript) {
       return data.choices?.[0]?.message?.content || '';
     } catch (e) {
       lastErr = e;
-      if (!/LLM HTTP (429|500|502|503)/.test(e.message)) throw e;
+      if (!/LLM HTTP (429|5\d\d)/.test(e.message)) throw e;
     }
   }
   throw lastErr;
