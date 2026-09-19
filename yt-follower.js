@@ -149,12 +149,53 @@ async function fetchLatestVideos(channelId, n) {
 
 async function getTranscript(videoId) {
   try {
-    const chunks = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'ru' })
-      .catch(() => YoutubeTranscript.fetchTranscript(videoId));
-    return chunks.map(c => c.text).join(' ');
-  } catch {
-    return null;
+    const chunks = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'ru' });
+    if (chunks?.length) return chunks.map(c => c.text).join(' ');
+  } catch {}
+  try {
+    const chunks = await YoutubeTranscript.fetchTranscript(videoId);
+    if (chunks?.length) return chunks.map(c => c.text).join(' ');
+  } catch {}
+  return fetchGoogleTimedText(videoId);
+}
+
+async function fetchGoogleTimedText(videoId) {
+  const urls = [
+    `https://video.google.com/timedtext?lang=ru&v=${videoId}`,
+    `https://video.google.com/timedtext?lang=en&v=${videoId}`,
+    `https://video.google.com/timedtext?v=${videoId}`,
+  ];
+  for (const url of urls) {
+    try {
+      const xml = await fetchText(url);
+      const parts = [...xml.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/g)]
+        .map(m => decodeEntities(m[1]).replace(/<[^>]+>/g, '').trim())
+        .filter(Boolean);
+      if (parts.length) return parts.join(' ');
+    } catch {}
   }
+  return null;
+}
+
+async function getWatchDescription(videoId) {
+  try {
+    const html = await fetchText(`https://www.youtube.com/watch?v=${videoId}`);
+    const m = html.match(/"shortDescription":"((?:[^"\\]|\\.)*)"/);
+    if (!m) return '';
+    return m[1]
+      .replace(/\\n/g, '\n')
+      .replace(/\\"/g, '"')
+      .replace(/\\\//g, '/')
+      .replace(/\\\\/g, '\\');
+  } catch {
+    return '';
+  }
+}
+
+async function gatherContent(video) {
+  const transcript = await getTranscript(video.id);
+  const desc = video.description || (await getWatchDescription(video.id));
+  return { transcript, desc };
 }
 
 function buildPrompt(title, description, transcript) {
@@ -248,11 +289,11 @@ async function sendToTelegram(text) {
 async function processVideo(channelName, video) {
   console.log(`  видео: ${video.id} «${video.title}»`);
 
-  const transcript = await getTranscript(video.id);
-  console.log('  транскрипт:', transcript ? `${transcript.length} символов` : 'недоступен');
+  const { transcript, desc } = await gatherContent(video);
+  console.log('  контент: транскрипт', transcript ? `${transcript.length} симв.` : 'нет', `/ описание ${desc.length} симв.`);
   let analysis;
   try {
-    analysis = await analyze(video.title, video.description, transcript);
+    analysis = await analyze(video.title, desc, transcript);
   } catch (e) {
     console.error(`  ошибка LLM: ${e.message}`);
     return;
@@ -351,9 +392,9 @@ async function main() {
 
 async function testVideo(video) {
   console.log(`  тест: ${video.id}`);
-  const transcript = await getTranscript(video.id);
-  console.log('  транскрипт:', transcript ? `${transcript.length} символов` : 'недоступен');
-  const analysis = await analyze(video.title, video.description, transcript);
+  const { transcript, desc } = await gatherContent(video);
+  console.log('  контент: транскрипт', transcript ? `${transcript.length} симв.` : 'нет', `/ описание ${desc.length} симв.`);
+  const analysis = await analyze(video.title, desc, transcript);
   if (!analysis.trim() || /NO_PRICE/i.test(analysis) || !hasNumericPrice(analysis)) {
     console.log('  не интересует: нет численной цены/уровня');
     return;
