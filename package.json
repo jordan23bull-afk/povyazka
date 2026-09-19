@@ -1,9 +1,12 @@
 {
-  "name": "tg-posts-follower",
+  "name": "yt-daily-scan",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "node tg-follower.js"
+    "start": "node yt-follower.js"
+  },
+  "dependencies": {
+    "youtube-transcript": "^1.2.1"
   },
   "engines": {
     "node": ">=18"
