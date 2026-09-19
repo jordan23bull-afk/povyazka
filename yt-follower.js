@@ -12,7 +12,16 @@ const SEEN_FILE = env.SEEN_FILE || 'seen-videos.json';
 const MAX_CHARS = Number(env.MAX_CHARS || 24000);
 const LIMIT_PER_CHANNEL = Number(env.LIMIT_PER_CHANNEL || 15);
 
-const DEFAULT_CHANNELS = [];
+const DEFAULT_CHANNELS = [
+  'golodgoroda',
+  'stary_trader',
+  'tradingnewsN1',
+  'vataga',
+  'Проф_трейдер',
+  'aeadamovich',
+  'TradersUniversity888',
+  'market_insaids',
+];
 const CHANNELS = env.CHANNELS ? splitList(env.CHANNELS) : DEFAULT_CHANNELS;
 
 function splitList(str) {
@@ -97,7 +106,7 @@ function isToday(published) {
 async function resolveChannelId(channel) {
   if (/^UC[\w-]{22}$/.test(channel)) return channel;
   const handle = channel.replace(/^@/, '').replace(/^https?:\/\/(www\.)?youtube\.com\//, '').replace(/\/+$/, '');
-  const html = await fetchText(`https://www.youtube.com/@${handle}`);
+  const html = await fetchText(`https://www.youtube.com/@${encodeURIComponent(handle)}`);
   const m = html.match(/"channelId":"(UC[\w-]{22})"/);
   if (!m) throw new Error(`не удалось определить channelId для ${channel}`);
   return m[1];
