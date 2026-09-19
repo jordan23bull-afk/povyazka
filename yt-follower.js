@@ -183,22 +183,42 @@ ${(transcript || '').slice(0, MAX_CHARS)}
 Пиши только по фактам из видео, ничего не додумывай.`;
 }
 
+const LLM_RETRIES = Number(env.LLM_RETRIES || 4);
+const LLM_RETRY_DELAY_MS = Number(env.LLM_RETRY_DELAY_MS || 15000);
+
 async function analyze(title, description, transcript) {
-  const res = await fetch(`${LLM_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${LLM_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: LLM_MODEL,
-      messages: [{ role: 'user', content: buildPrompt(title, description, transcript) }],
-      temperature: 0,
-    }),
+  const body = JSON.stringify({
+    model: LLM_MODEL,
+    messages: [{ role: 'user', content: buildPrompt(title, description, transcript) }],
+    temperature: 0,
   });
-  if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || '';
+  let lastErr;
+  for (let attempt = 0; attempt < LLM_RETRIES; attempt++) {
+    try {
+      const res = await fetch(`${LLM_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${LLM_API_KEY}`,
+        },
+        body,
+      });
+      if (res.status === 429 || res.status === 500 || res.status === 502 || res.status === 503) {
+        lastErr = new Error(`LLM HTTP ${res.status}`);
+        const wait = LLM_RETRY_DELAY_MS * (attempt + 1);
+        console.log(`  LLM лимит/перегрузка (${res.status}), повтор ${attempt + 1}/${LLM_RETRIES} через ${Math.round(wait / 1000)}с`);
+        await sleep(wait);
+        continue;
+      }
+      if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      const data = await res.json();
+      return data.choices?.[0]?.message?.content || '';
+    } catch (e) {
+      lastErr = e;
+      if (!/LLM HTTP (429|500|502|503)/.test(e.message)) throw e;
+    }
+  }
+  throw lastErr;
 }
 
 function escapeHtml(s) {
