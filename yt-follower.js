@@ -107,13 +107,32 @@ function isToday(published) {
     && d.getUTCDate() === now.getUTCDate();
 }
 
+const ID_PATTERNS = [
+  /"externalId":"(UC[\w-]{22})"/,
+  /"channelId":"(UC[\w-]{22})"/,
+  /\/channel\/(UC[\w-]{22})/,
+  /"browseId":"(UC[\w-]{22})"/,
+];
+
 async function resolveChannelId(channel) {
   if (/^UC[\w-]{22}$/.test(channel)) return channel;
   const handle = channel.replace(/^@/, '').replace(/^https?:\/\/(www\.)?youtube\.com\//, '').replace(/\/+$/, '');
-  const html = await fetchText(`https://www.youtube.com/@${encodeURIComponent(handle)}`);
-  const m = html.match(/"channelId":"(UC[\w-]{22})"/);
-  if (!m) throw new Error(`не удалось определить channelId для ${channel}`);
-  return m[1];
+  const urls = [
+    `https://www.youtube.com/@${encodeURIComponent(handle)}/about`,
+    `https://m.youtube.com/@${encodeURIComponent(handle)}`,
+  ];
+  for (const url of urls) {
+    try {
+      const html = await fetchText(url);
+      for (const re of ID_PATTERNS) {
+        const m = html.match(re);
+        if (m) return m[1];
+      }
+    } catch {
+      console.log(`  не удалось открыть ${url}`);
+    }
+  }
+  throw new Error(`не удалось определить channelId для ${channel}`);
 }
 
 async function fetchTodayVideos(channelId) {
@@ -266,9 +285,10 @@ async function main() {
     seen[TEST_VIDEO_ID] = true;
     await saveSeen(seen);
   } else {
-    for (const channel of CHANNELS) {
+    for (const entry of CHANNELS) {
       try {
-        const channelId = await resolveChannelId(channel);
+        const [channel, knownId] = entry.split(':');
+        const channelId = knownId || await resolveChannelId(channel);
         const videos = TEST_LATEST
           ? await fetchLatestVideos(channelId, 1)
           : await fetchTodayVideos(channelId);
