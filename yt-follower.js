@@ -15,14 +15,8 @@ const TEST_VIDEO_ID = (env.TEST_VIDEO_ID || '').trim();
 const TEST_LATEST = env.TEST_LATEST === 'true' || env.TEST_LATEST === '1';
 
 const DEFAULT_CHANNELS = [
-  'golodgoroda',
-  'stary_trader',
-  'tradingnewsN1',
-  'vataga',
   'Проф_трейдер',
-  'aeadamovich',
   'TradersUniversity888',
-  'market_insaids',
 ];
 const CHANNELS = env.CHANNELS ? splitList(env.CHANNELS) : DEFAULT_CHANNELS;
 
