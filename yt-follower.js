@@ -11,6 +11,8 @@ const LLM_MODEL = env.LLM_MODEL || 'gpt-4o-mini';
 const SEEN_FILE = env.SEEN_FILE || 'seen-videos.json';
 const MAX_CHARS = Number(env.MAX_CHARS || 24000);
 const LIMIT_PER_CHANNEL = Number(env.LIMIT_PER_CHANNEL || 15);
+const TEST_VIDEO_ID = (env.TEST_VIDEO_ID || '').trim();
+const TEST_LATEST = env.TEST_LATEST === 'true' || env.TEST_LATEST === '1';
 
 const DEFAULT_CHANNELS = [
   'golodgoroda',
@@ -119,6 +121,11 @@ async function fetchTodayVideos(channelId) {
   return parseFeed(xml)
     .filter(v => isToday(v.published))
     .slice(0, LIMIT_PER_CHANNEL);
+}
+
+async function fetchLatestVideos(channelId, n) {
+  const xml = await fetchText(`https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`);
+  return parseFeed(xml).slice(0, n);
 }
 
 async function getTranscript(videoId) {
@@ -230,6 +237,8 @@ async function processVideo(channelName, video) {
 
 async function main() {
   console.log('YouTube-сканер запущен');
+  const testMode = !!(TEST_VIDEO_ID || TEST_LATEST);
+  if (testMode) console.log('ТЕСТОВЫЙ РЕЖИМ:', TEST_VIDEO_ID || 'последнее видео каждого канала');
   console.log('Каналы:', CHANNELS.length ? CHANNELS.join(', ') : 'не заданы');
 
   if (CHANNELS.length === 0) {
@@ -240,29 +249,72 @@ async function main() {
   const seen = await loadSeen();
   let processed = 0;
 
-  for (const channel of CHANNELS) {
+  if (TEST_VIDEO_ID) {
+    const video = {
+      id: TEST_VIDEO_ID,
+      title: `Тест видео ${TEST_VIDEO_ID}`,
+      description: '',
+      published: '',
+      link: `https://www.youtube.com/watch?v=${TEST_VIDEO_ID}`,
+    };
     try {
-      const channelId = await resolveChannelId(channel);
-      const videos = await fetchTodayVideos(channelId);
-      console.log(`[${channel}] видео за сегодня: ${videos.length}`);
-      for (const video of videos) {
-        if (seen[video.id]) continue;
-        try {
-          await processVideo(channel, video);
-          processed++;
-        } catch (e) {
-          console.error(`  ошибка обработки ${video.id}: ${e.message}`);
-        }
-        seen[video.id] = true;
-        await saveSeen(seen);
-        await sleep(1500);
-      }
+      await testVideo(video);
+      processed++;
     } catch (e) {
-      console.error(`[${channel}] ошибка: ${e.message}`);
+      console.error(`  ошибка: ${e.message}`);
+    }
+    seen[TEST_VIDEO_ID] = true;
+    await saveSeen(seen);
+  } else {
+    for (const channel of CHANNELS) {
+      try {
+        const channelId = await resolveChannelId(channel);
+        const videos = TEST_LATEST
+          ? await fetchLatestVideos(channelId, 1)
+          : await fetchTodayVideos(channelId);
+        console.log(`[${channel}] ${TEST_LATEST ? 'последнее видео' : 'видео за сегодня'}: ${videos.length}`);
+        for (const video of videos) {
+          if (seen[video.id]) continue;
+          try {
+            await processVideo(channel, video);
+            processed++;
+          } catch (e) {
+            console.error(`  ошибка обработки ${video.id}: ${e.message}`);
+          }
+          seen[video.id] = true;
+          await saveSeen(seen);
+          await sleep(1500);
+        }
+      } catch (e) {
+        console.error(`[${channel}] ошибка: ${e.message}`);
+      }
     }
   }
 
-  console.log(`Готово. Обработано новых видео: ${processed}`);
+  console.log(testMode ? `Тест завершён. Обработано: ${processed}` : `Готово. Обработано новых видео: ${processed}`);
+}
+
+async function testVideo(video) {
+  console.log(`  тест: ${video.id}`);
+  const transcript = await getTranscript(video.id);
+  console.log('  транскрипт:', transcript ? `${transcript.length} символов` : 'недоступен');
+  const analysis = await analyze(video.title, video.description, transcript);
+  if (!analysis.trim() || /NO_PRICE/i.test(analysis)) {
+    console.log('  LLM ответил: не интересует (нет цены/уровня)');
+    return;
+  }
+  const fields = analysis
+    .replace(/^NO_PRICE\s*/i, '')
+    .split('\n')
+    .map(s => s.replace(/^[*-]\s*/, '').trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  const msg =
+    `🎬 <b>TEST</b>\n` +
+    `<a href="${video.link}">${escapeHtml(video.title)}</a>\n\n` +
+    fields.map(escapeHtml).join('\n');
+  await sendToTelegram(msg);
+  console.log('  отправлено');
 }
 
 main().catch(e => {

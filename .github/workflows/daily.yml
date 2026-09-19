@@ -29,6 +29,8 @@ jobs:
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           CHANNELS: ${{ vars.CHANNELS }}
+          TEST_LATEST: ${{ vars.TEST_LATEST }}
+          TEST_VIDEO_ID: ${{ vars.TEST_VIDEO_ID }}
         run: node yt-follower.js
 
       - name: Save seen state
