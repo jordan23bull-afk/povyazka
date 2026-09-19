@@ -311,8 +311,70 @@ async function gatherContent(video) {
   if (!desc) desc = video.description || '';
   let transcript = html ? await extractTranscriptFromPage(html) : null;
   if (!transcript) transcript = await getCaptionFromInnertube(video.id);
+  if (!transcript) transcript = await fetchTranscriptApi(video.id);
   if (!transcript) transcript = await fetchGoogleTimedText(video.id);
   return { transcript, desc };
+}
+
+function extractTranscriptFromHtml(body) {
+  const patterns = [
+    /class="transcript-segment-text"[^>]*>([\s\S]*?)<\/[a-z]+>/g,
+    /<span[^>]*class="[^"]*(?:transcript|segment)[^"]*"[^>]*>([\s\S]*?)<\/span>/g,
+  ];
+  for (const re of patterns) {
+    const s = [...body.matchAll(re)]
+      .map(m => decodeEntities(m[1]).replace(/<[^>]+>/g, '').trim())
+      .filter(Boolean)
+      .join(' ');
+    if (s.length > 100) return s;
+  }
+  return null;
+}
+
+async function fetchTranscriptApi(videoId) {
+  const endpoints = [
+    { name: 'tokentools', url: `https://api.tokentools.xyz/get_transcript?yt_url=https://www.youtube.com/watch?v=${videoId}`, json: true },
+    { name: 'yt2transcript', url: `https://youtubetotranscript.com/transcript?v=${videoId}`, json: false },
+  ];
+  for (const e of endpoints) {
+    try {
+      const res = await fetch(e.url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36',
+          'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8',
+        },
+        signal: AbortSignal.timeout(25000),
+      });
+      if (!res.ok) {
+        console.log(`  api ${e.name} http ${res.status}`);
+        continue;
+      }
+      const body = await res.text();
+      let text = null;
+      if (e.json) {
+        try {
+          const j = JSON.parse(body);
+          const err = j?.error || (j && typeof j === 'object' && j.message);
+          if (err) {
+            console.log(`  api ${e.name}: ${typeof err === 'string' ? err : 'ошибка'}`);
+            continue;
+          }
+          const arr = (Array.isArray(j?.data) && j.data) || (Array.isArray(j?.transcript) && j.transcript) || [];
+          text = arr.map(s => (s && s.text) || '').filter(Boolean).join(' ') || null;
+        } catch {}
+      } else {
+        text = extractTranscriptFromHtml(body);
+      }
+      if (text) {
+        console.log(`  api ${e.name}: расшифровка ${text.length} симв.`);
+        return text;
+      }
+      console.log(`  api ${e.name}: пусто`);
+    } catch (e) {
+      console.log(`  api ${e.name} не вышел: ${e.message}`);
+    }
+  }
+  return null;
 }
 
 function buildPrompt(title, description, transcript) {
