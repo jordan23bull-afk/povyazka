@@ -43,7 +43,11 @@ async function fetchText(url) {
   for (let i = 0; i < 3; i++) {
     try {
       const res = await fetch(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+          'Cookie': 'CONSENT=YES+cb.20210328-17-p0.en+FX+678',
+          'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8',
+        },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.text();
@@ -167,17 +171,36 @@ function extractShortDescription(html) {
 
 async function fetchCaptionBase(baseUrl) {
   const sep = baseUrl.includes('?') ? '&' : '?';
-  const raw = await fetchText(baseUrl + sep + 'fmt=json3');
-  const data = JSON.parse(raw);
-  const out = (data.events || [])
-    .map(e => (e.segs || []).map(s => s.utf8 || '').join(''))
-    .filter(s => s.trim())
-    .join(' ');
-  return out || null;
+  try {
+    const raw = await fetchText(baseUrl + sep + 'fmt=json3');
+    const data = JSON.parse(raw);
+    const out = (data.events || [])
+      .map(e => (e.segs || []).map(s => s.utf8 || '').join(''))
+      .filter(s => s.trim())
+      .join(' ');
+    if (out) return out;
+  } catch (e) {
+    console.log(`    json3 не вышел (${e.message}), пробую дорожку напрямую`);
+  }
+  try {
+    const xml = await fetchText(baseUrl);
+    const srv3 = [...xml.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/g)]
+      .map(m => decodeEntities(m[1]).trim())
+      .filter(Boolean);
+    if (srv3.length) return srv3.join(' ');
+    const classic = [...xml.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/g)]
+      .map(m => decodeEntities(m[1]).replace(/<[^>]+>/g, '').trim())
+      .filter(Boolean);
+    if (classic.length) return classic.join(' ');
+  } catch (e) {
+    console.log(`    прямая дорожка не вышла (${e.message})`);
+  }
+  return null;
 }
 
 async function extractTranscriptFromPage(html) {
   const tracks = extractCaptionTracks(html);
+  console.log('  caption tracks:', tracks.length, tracks.length ? tracks.slice(0, 3).map(t => `${t.lang}${t.isAsr ? '/asr' : ''}`).join(', ') : '');
   if (!tracks.length) return null;
   const ru = tracks.filter(t => t.lang.toLowerCase().startsWith('ru'));
   const asr = ru.length ? ru : tracks.filter(t => t.isAsr);
@@ -186,10 +209,8 @@ async function extractTranscriptFromPage(html) {
   for (const t of ordered) {
     if (tried.has(t.url + t.lang)) continue;
     tried.add(t.url + t.lang);
-    try {
-      const text = await fetchCaptionBase(t.url);
-      if (text) return text;
-    } catch {}
+    const text = await fetchCaptionBase(t.url);
+    if (text) return text;
   }
   return null;
 }
@@ -214,9 +235,15 @@ async function fetchGoogleTimedText(videoId) {
 
 async function gatherContent(video) {
   let html = '';
-  try {
-    html = await fetchText(`https://www.youtube.com/watch?v=${video.id}`);
-  } catch {}
+  for (const u of [
+    `https://www.youtube.com/watch?v=${video.id}`,
+    `https://m.youtube.com/watch?v=${video.id}`,
+  ]) {
+    try {
+      html = await fetchText(u);
+      if (html && extractCaptionTracks(html).length) break;
+    } catch {}
+  }
   let desc = html ? extractShortDescription(html) : '';
   if (!desc) desc = video.description || '';
   let transcript = html ? await extractTranscriptFromPage(html) : null;
