@@ -31,4 +31,6 @@ jobs:
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           IPINFO_TOKEN: ${{ secrets.IPINFO_TOKEN }}
+          HTTP_PROXY: ${{ secrets.HTTP_PROXY }}
+          HTTPS_PROXY: ${{ secrets.HTTPS_PROXY }}
         run: python yttest.py --video-id "${{ inputs.video-id }}" --languages "${{ inputs.languages }}" --json
